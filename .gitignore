@@ -1,0 +1,5 @@
+config/tmdb_token.txt
+config/kobis_key.txt
+data/*.csv
+__pycache__/
+*.pyc
