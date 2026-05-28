@@ -1,5 +1,13 @@
+*.DS_Store
 config/tmdb_token.txt
 config/kobis_key.txt
 data/*.csv
+data/processed/*.csv
+data/posters/*
+!data/posters/.gitkeep
+outputs/figures/*
+!outputs/figures/.gitkeep
+outputs/metrics/*
+!outputs/metrics/.gitkeep
 __pycache__/
 *.pyc

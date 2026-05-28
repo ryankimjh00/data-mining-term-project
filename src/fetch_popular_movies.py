@@ -260,7 +260,7 @@ def load_token(token_file: Path) -> str:
     if not token_file.exists():
         raise TmdbError(
             f"키 파일이 없습니다: {token_file}\n"
-            f"먼저 `python3 fetch_popular_movies.py --init-key`를 실행하세요."
+            f"먼저 `python3 src/fetch_popular_movies.py --init-key`를 실행하세요."
         )
 
     token = token_file.read_text(encoding="utf-8").strip()
