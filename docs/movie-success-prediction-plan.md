@@ -29,11 +29,11 @@
 
 | 구분 | 컬럼 예시 |
 | --- | --- |
-| 흥행 정보 | `audience_count`, `sales_amount`, `screen_count` |
+| 흥행 정보 | `audience_count` |
 | 기본 정보 | `match_title`, `open_date`, `tmdb_runtime`, `tmdb_release_year` |
 | 장르 정보 | `tmdb_genres`, `tmdb_genre_ids` |
 | 제작 정보 | `tmdb_production_companies`, `tmdb_directors`, `tmdb_cast` |
-| TMDB 정보 | `tmdb_popularity`, `tmdb_vote_average`, `tmdb_vote_count` |
+| TMDB 정보 | `tmdb_budget` |
 | 이미지 정보 | `tmdb_poster_url` |
 
 ## 4. 타깃 변수 설계
@@ -66,7 +66,7 @@ target = log1p(audience_count)
 
 ### 5.1 수치형 변수
 
-- `audience_count`, `sales_amount`, `screen_count`, `tmdb_runtime`
+- `tmdb_runtime`, `tmdb_budget`
 - 결측치 처리
 - 이상치 확인
 - 필요 시 로그 변환
@@ -271,8 +271,6 @@ TMDB/
 
 - 천만 관객 여부만 타깃으로 설정하지 않는다.
 - 클래스 불균형을 반드시 확인한다.
-- 개봉 전 예측 실험에서는 개봉 후에만 알 수 있는 변수 사용을 제한한다.
-- `tmdb_vote_average`, `tmdb_vote_count`, `tmdb_popularity`는 성공 요인 분석 실험에서는 사용할 수 있지만, 개봉 전 예측 실험에서는 데이터 누수 가능성을 명시한다.
 - 임시 코드, 불필요한 출력, 디버깅 로그는 제거한다.
 - 결과 해석에서는 성능 수치뿐 아니라 모델별 특성과 한계를 함께 설명한다.
 
@@ -286,4 +284,3 @@ TMDB/
 - Feature Importance 분석 결과
 - 오분류 사례 분석
 - 보고서 작성용 결론 정리
-

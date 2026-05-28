@@ -2,6 +2,12 @@
 
 TMDB API로 인기 영화 목록과 영화별 상세 정보를 가져와 CSV 파일로 저장하는 간단한 Python 프로그램입니다.
 
+## 환경 준비
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
 ## API 키 준비
 
 TMDB의 `authentication/token/new`, `authentication/session/new` 엔드포인트는 API 키 발급용이 아니라 사용자 승인 세션용입니다. 영화 목록 조회에는 계정 설정의 API 메뉴에서 발급한 `API Key` 또는 `API Read Access Token`이 필요합니다.
@@ -104,9 +110,35 @@ python3 src/map_kobis_tmdb_titles.py --kobis data/kobis_yearly_boxoffice_korean_
 python3 src/download_posters.py --input data/kobis_tmdb_title_matches.csv --output-dir data/posters
 ```
 
+## 흥행 예측 분석 파이프라인
+
+포스터 이미지 특성을 추출합니다.
+
+```bash
+python3 src/feature_poster.py --input data/kobis_tmdb_title_matches.csv --poster-dir data/posters --output data/processed/poster_features.csv
+```
+
+제목, 메타데이터, 포스터 특성을 통합한 학습용 CSV를 만듭니다.
+
+```bash
+python3 src/preprocessing.py --input data/kobis_tmdb_title_matches.csv --output data/processed/movie_features.csv
+```
+
+분류 모델과 ablation study를 실행합니다. 기본 흥행 기준은 누적 관객 수 300만 명입니다.
+
+```bash
+python3 src/train_classification.py --input data/processed/movie_features.csv --target is_success_3000000
+```
+
+회귀 모델을 실행합니다.
+
+```bash
+python3 src/train_regression.py --input data/processed/movie_features.csv
+```
+
 ## 폴더 구조
 
-- `src/`: 데이터 수집, 매핑, 포스터 다운로드 스크립트
+- `src/`: 데이터 수집, 매핑, 특성 추출, 모델 학습 스크립트
 - `data/processed/`: 전처리 산출물
 - `data/posters/`: 포스터 이미지 산출물
 - `notebooks/`: EDA 및 모델링 노트북
