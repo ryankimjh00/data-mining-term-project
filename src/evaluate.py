@@ -21,29 +21,44 @@ def classification_metrics(y_true, y_pred, y_score=None) -> Dict[str, float | in
         roc_auc_score,
     )
 
+    labels = sorted(set(y_true) | set(y_pred))
+    is_binary = len(labels) == 2 and set(labels) == {0, 1}
+    average = "binary" if is_binary else "macro"
+
     metrics: Dict[str, float | int | None] = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
-        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
-        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+        "precision": float(precision_score(y_true, y_pred, average=average, zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, average=average, zero_division=0)),
+        "f1": float(f1_score(y_true, y_pred, average=average, zero_division=0)),
+        "precision_macro": float(precision_score(y_true, y_pred, average="macro", zero_division=0)),
+        "recall_macro": float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
+        "f1_macro": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+        "precision_weighted": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "recall_weighted": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "f1_weighted": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
         "roc_auc": None,
+        "true_negative": None,
+        "false_positive": None,
+        "false_negative": None,
+        "true_positive": None,
     }
 
-    if y_score is not None and len(set(y_true)) == 2:
+    if y_score is not None and is_binary:
         try:
             metrics["roc_auc"] = float(roc_auc_score(y_true, y_score))
         except ValueError:
             metrics["roc_auc"] = None
 
-    matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
-    metrics.update(
-        {
-            "true_negative": int(matrix[0, 0]),
-            "false_positive": int(matrix[0, 1]),
-            "false_negative": int(matrix[1, 0]),
-            "true_positive": int(matrix[1, 1]),
-        }
-    )
+    if is_binary:
+        matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
+        metrics.update(
+            {
+                "true_negative": int(matrix[0, 0]),
+                "false_positive": int(matrix[0, 1]),
+                "false_negative": int(matrix[1, 0]),
+                "true_positive": int(matrix[1, 1]),
+            }
+        )
     return metrics
 
 
@@ -86,15 +101,26 @@ def write_rows(path: Path, rows: Sequence[Dict[str, object]]) -> None:
         writer.writerows(rows)
 
 
-def save_confusion_matrix(path: Path, y_true, y_pred, title: str) -> None:
+def save_confusion_matrix(
+    path: Path,
+    y_true,
+    y_pred,
+    title: str,
+    labels: Sequence[object] | None = None,
+    display_labels: Sequence[str] | None = None,
+) -> None:
     import matplotlib.pyplot as plt
     from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    if labels is None:
+        labels = sorted(set(y_true) | set(y_pred))
+    if display_labels is None:
+        display_labels = ["non-success", "success"] if list(labels) == [0, 1] else labels
+    matrix = confusion_matrix(y_true, y_pred, labels=labels)
     display = ConfusionMatrixDisplay(
         confusion_matrix=matrix,
-        display_labels=["non-success", "success"],
+        display_labels=display_labels,
     )
     display.plot(cmap="Blues", values_format="d")
     plt.title(title)
