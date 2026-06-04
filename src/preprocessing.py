@@ -19,7 +19,21 @@ DEFAULT_INPUT_FILE = Path("data/kobis_tmdb_title_matches.csv")
 DEFAULT_OUTPUT_FILE = Path("data/processed/movie_features.csv")
 DEFAULT_POSTER_FEATURE_FILE = Path("data/processed/poster_features.csv")
 DEFAULT_TITLE_FIELD = "match_title"
-SUCCESS_THRESHOLDS = (1_000_000, 3_000_000, 5_000_000)
+SUCCESS_THRESHOLDS = (1_000_000, 3_000_000, 5_000_000, 10_000_000)
+SUCCESS_RANK_THRESHOLDS = (
+    ("S", 10_000_000),
+    ("A", 5_000_000),
+    ("B", 3_000_000),
+    ("C", 1_000_000),
+    ("D", 0),
+)
+SUCCESS_RANK_CODES = {
+    "D": 0,
+    "C": 1,
+    "B": 2,
+    "A": 3,
+    "S": 4,
+}
 
 NUMERIC_SOURCE_FIELDS = {
     "meta_tmdb_release_year": "tmdb_release_year",
@@ -30,6 +44,8 @@ NUMERIC_SOURCE_FIELDS = {
 LOG_FEATURES = {
     "meta_log_tmdb_budget": "meta_tmdb_budget",
 }
+TOP_DIRECTOR_FEATURE_LIMIT = 30
+TOP_CAST_FEATURE_LIMIT = 50
 
 
 def parse_thresholds(value: str) -> List[int]:
@@ -90,10 +106,23 @@ def add_target_columns(result, raw_frame, thresholds: Sequence[int]):
     audience_count = to_number_series(source_series(raw_frame, "audience_count"))
     result["audience_count"] = audience_count
     result["target_log_audience"] = np.log1p(audience_count.clip(lower=0))
+    result["success_rank"] = audience_count.map(success_rank)
+    result["success_rank_code"] = result["success_rank"].map(SUCCESS_RANK_CODES)
     for threshold in thresholds:
         column = f"is_success_{threshold}"
         result[column] = (audience_count >= threshold).where(audience_count.notna())
     return result
+
+
+def success_rank(audience_count: float) -> str | None:
+    import pandas as pd
+
+    if pd.isna(audience_count):
+        return None
+    for rank, threshold in SUCCESS_RANK_THRESHOLDS:
+        if audience_count >= threshold:
+            return rank
+    return None
 
 
 def add_numeric_features(result, raw_frame):
@@ -132,6 +161,7 @@ def add_date_features(result, raw_frame):
     result["meta_is_year_end"] = (open_month == 12).astype(int)
 
     seasons = open_month.map(season_from_month)
+    result["open_season"] = seasons
     for season in ("spring", "summer", "fall", "winter"):
         result[f"meta_season_{season}"] = (seasons == season).astype(int)
     return result
@@ -172,6 +202,45 @@ def frequency_summary_features(
     return result
 
 
+def top_value_indicator_features(
+    result,
+    raw_frame,
+    source_field: str,
+    prefix: str,
+    limit: int,
+    cleaner=None,
+):
+    value_lists = source_series(raw_frame, source_field).map(split_values)
+    if cleaner is not None:
+        value_lists = value_lists.map(lambda values: [cleaner(value) for value in values])
+    value_lists = value_lists.map(lambda values: [value for value in values if value])
+
+    counts = Counter(value for values in value_lists for value in values)
+    top_values = [
+        value
+        for value, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    ]
+
+    feature_data = {}
+    used_columns: set[str] = set()
+    for value in top_values:
+        base_column = f"{prefix}_{safe_feature_name(value)}"
+        column = base_column
+        suffix = 2
+        while column in used_columns or column in result.columns:
+            column = f"{base_column}_{suffix}"
+            suffix += 1
+        used_columns.add(column)
+        feature_data[column] = value_lists.map(lambda values, item=value: int(item in values))
+
+    if not feature_data:
+        return result
+
+    import pandas as pd
+
+    return pd.concat([result, pd.DataFrame(feature_data, index=result.index)], axis=1)
+
+
 def add_frequency_features(result, raw_frame):
     frequency_summary_features(
         result,
@@ -191,6 +260,21 @@ def add_frequency_features(result, raw_frame):
         raw_frame,
         "tmdb_production_companies",
         "meta_production_company",
+    )
+    result = top_value_indicator_features(
+        result,
+        raw_frame,
+        "tmdb_directors",
+        "meta_top_director",
+        TOP_DIRECTOR_FEATURE_LIMIT,
+    )
+    result = top_value_indicator_features(
+        result,
+        raw_frame,
+        "tmdb_cast",
+        "meta_top_cast",
+        TOP_CAST_FEATURE_LIMIT,
+        cleaner=clean_cast_name,
     )
     return result
 
@@ -250,7 +334,7 @@ def build_feature_frame(
     add_numeric_features(result, raw_frame)
     add_date_features(result, raw_frame)
     add_genre_features(result, raw_frame)
-    add_frequency_features(result, raw_frame)
+    result = add_frequency_features(result, raw_frame)
     result = merge_title_features(result, raw_frame, title_field)
     if poster_features_path is not None:
         result = merge_poster_features(result, poster_features_path, title_field)
@@ -334,8 +418,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--success-thresholds",
-        default="1000000,3000000,5000000",
-        help="쉼표로 구분한 흥행 기준 관객 수입니다. 기본값: 1000000,3000000,5000000",
+        default="1000000,3000000,5000000,10000000",
+        help="쉼표로 구분한 흥행 기준 관객 수입니다. 기본값: 1000000,3000000,5000000,10000000",
     )
     return parser.parse_args()
 

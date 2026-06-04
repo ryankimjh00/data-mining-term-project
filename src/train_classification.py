@@ -32,9 +32,12 @@ DEFAULT_PREDICTION_FIGURES_DIR = Path("outputs/figures/classification_prediction
 DEFAULT_IMPORTANCE_DIR = Path("outputs/metrics/feature_importance")
 DEFAULT_TARGET = "is_success_3000000"
 EXPERIMENTS = ("metadata", "metadata_title", "metadata_poster", "all")
+SUCCESS_RANK_ORDER = ("D", "C", "B", "A", "S")
+SUCCESS_RANK_CODES = {rank: index for index, rank in enumerate(SUCCESS_RANK_ORDER)}
 PREDICTION_CONTEXT_COLUMNS = (
     "match_title",
     "open_date",
+    "open_season",
     "audience_count",
     "tmdb_genres",
 )
@@ -104,10 +107,14 @@ def build_models(random_state: int) -> Dict[str, object]:
 def prediction_scores(model, features):
     if hasattr(model, "predict_proba"):
         probabilities = model.predict_proba(features)
-        if probabilities.shape[1] > 1:
+        if probabilities.shape[1] == 2:
             return probabilities[:, 1]
+        return probabilities.max(axis=1)
     if hasattr(model, "decision_function"):
-        return model.decision_function(features)
+        decision_values = model.decision_function(features)
+        if getattr(decision_values, "ndim", 1) == 1:
+            return decision_values
+        return decision_values.max(axis=1)
     return None
 
 
@@ -132,7 +139,15 @@ def save_model_importance(
         return
 
     if hasattr(estimator, "coef_"):
-        coefficients = estimator.coef_[0]
+        coefficients = estimator.coef_
+        if getattr(coefficients, "ndim", 1) > 1 and coefficients.shape[0] > 1:
+            write_feature_importance(
+                output_path,
+                feature_names,
+                abs(coefficients).mean(axis=0),
+            )
+            return
+        coefficients = coefficients[0] if getattr(coefficients, "ndim", 1) > 1 else coefficients
         write_feature_importance(
             output_path,
             feature_names,
@@ -142,6 +157,8 @@ def save_model_importance(
 
 
 def classification_result(actual: int, predicted: int) -> str:
+    if actual not in (0, 1) or predicted not in (0, 1):
+        return "correct" if actual == predicted else "incorrect"
     if actual == 1 and predicted == 1:
         return "true_positive"
     if actual == 0 and predicted == 0:
@@ -162,10 +179,11 @@ def prediction_rows(
     scores,
 ) -> List[Dict[str, object]]:
     rows: List[Dict[str, object]] = []
+    predicted_values = list(y_pred)
     for position, index in enumerate(test_indices):
         source_row = frame.loc[index]
-        actual = int(y_true.iloc[position])
-        predicted = int(y_pred[position])
+        actual = y_true.iloc[position]
+        predicted = predicted_values[position]
         output_row: Dict[str, object] = {
             "experiment": experiment,
             "model": model_name,
@@ -183,6 +201,10 @@ def prediction_rows(
     return rows
 
 
+def target_is_binary_success(target: str) -> bool:
+    return target.startswith("is_success_")
+
+
 def target_threshold(target: str) -> int | None:
     prefix = "is_success_"
     if not target.startswith(prefix):
@@ -191,6 +213,13 @@ def target_threshold(target: str) -> int | None:
         return int(target.removeprefix(prefix))
     except ValueError:
         return None
+
+
+def ordered_labels(values) -> List[object]:
+    value_set = set(values)
+    if value_set.issubset(set(SUCCESS_RANK_ORDER)):
+        return [rank for rank in SUCCESS_RANK_ORDER if rank in value_set]
+    return sorted(value_set)
 
 
 def save_prediction_scatter(
@@ -210,8 +239,16 @@ def save_prediction_scatter(
         return
 
     frame["audience_count"] = pd.to_numeric(frame["audience_count"], errors="coerce")
-    frame["predicted_score"] = pd.to_numeric(frame["predicted_score"], errors="coerce")
-    frame = frame.dropna(subset=["audience_count", "predicted_score"])
+    if target_is_binary_success(target):
+        y_field = "predicted_score"
+        y_label = "Predicted success score"
+        frame[y_field] = pd.to_numeric(frame[y_field], errors="coerce")
+    else:
+        y_field = "predicted_rank_code"
+        y_label = "Predicted success rank"
+        frame[y_field] = frame["predicted_label"].map(SUCCESS_RANK_CODES)
+
+    frame = frame.dropna(subset=["audience_count", y_field])
     frame = frame[frame["audience_count"] > 0]
     if frame.empty:
         return
@@ -221,6 +258,8 @@ def save_prediction_scatter(
         "true_negative": "#1f77b4",
         "false_positive": "#ff7f0e",
         "false_negative": "#d62728",
+        "correct": "#2ca02c",
+        "incorrect": "#d62728",
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,7 +267,7 @@ def save_prediction_scatter(
     for result_name, group in frame.groupby("classification_result"):
         axis.scatter(
             group["audience_count"],
-            group["predicted_score"],
+            group[y_field],
             label=f"{result_name} ({len(group)})",
             color=colors.get(result_name, "#7f7f7f"),
             alpha=0.8,
@@ -246,18 +285,53 @@ def save_prediction_scatter(
             linewidth=1,
             label=f"success threshold ({threshold:,})",
         )
-    axis.axhline(0.5, color="#999999", linestyle=":", linewidth=1)
+    if target_is_binary_success(target):
+        axis.axhline(0.5, color="#999999", linestyle=":", linewidth=1)
+        axis.set_ylim(-0.05, 1.05)
+    else:
+        for rank, code in SUCCESS_RANK_CODES.items():
+            axis.axhline(code, color="#dddddd", linestyle=":", linewidth=0.8)
+        for threshold in (1_000_000, 3_000_000, 5_000_000, 10_000_000):
+            axis.axvline(threshold, color="#444444", linestyle="--", linewidth=0.8)
+        axis.set_yticks(list(SUCCESS_RANK_CODES.values()))
+        axis.set_yticklabels(list(SUCCESS_RANK_CODES.keys()))
     axis.set_xscale("log")
     axis.set_xlabel("Actual audience count")
-    axis.set_ylabel("Predicted success score")
+    axis.set_ylabel(y_label)
     axis.set_title(title)
-    axis.set_ylim(-0.05, 1.05)
     axis.grid(True, which="both", axis="x", alpha=0.2)
     axis.grid(True, axis="y", alpha=0.2)
     axis.legend(loc="best", fontsize=9)
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
+
+
+def prepare_target_values(series, target: str):
+    import pandas as pd
+
+    if target_is_binary_success(target):
+        values = pd.to_numeric(series, errors="coerce")
+        return values.dropna().astype(int)
+    return series.dropna().astype(str)
+
+
+def encode_target_for_model(y_train, y_test, target: str):
+    import pandas as pd
+    from sklearn.preprocessing import LabelEncoder
+
+    if target_is_binary_success(target):
+        return y_train, y_test, None
+
+    encoder = LabelEncoder()
+    encoder.fit(pd.concat([y_train, y_test]).astype(str))
+    return encoder.transform(y_train.astype(str)), encoder.transform(y_test.astype(str)), encoder
+
+
+def decode_predictions(predictions, encoder):
+    if encoder is None:
+        return predictions
+    return encoder.inverse_transform(predictions)
 
 
 def train_single_experiment(
@@ -288,9 +362,9 @@ def train_single_experiment(
         )
 
     data = frame[feature_columns + [target]].copy()
-    data[target] = pd.to_numeric(data[target], errors="coerce")
-    data = data.dropna(subset=[target])
-    data[target] = data[target].astype(int)
+    target_values = prepare_target_values(data[target], target)
+    data = data.loc[target_values.index]
+    data[target] = target_values
     if data[target].nunique() < 2:
         return (
             [
@@ -319,9 +393,10 @@ def train_single_experiment(
 
     rows: List[Dict[str, object]] = []
     prediction_output_rows: List[Dict[str, object]] = []
+    y_train_model, _, target_encoder = encode_target_for_model(y_train, y_test, target)
     for model_name, model in build_models(random_state).items():
-        model.fit(x_train, y_train)
-        predictions = model.predict(x_test)
+        model.fit(x_train, y_train_model)
+        predictions = decode_predictions(model.predict(x_test), target_encoder)
         scores = prediction_scores(model, x_test)
         metric_row: Dict[str, object] = {
             "experiment": experiment,
@@ -347,11 +422,14 @@ def train_single_experiment(
         prediction_output_rows.extend(model_prediction_rows)
 
         safe_name = f"{experiment}_{model_name}_{target}"
+        labels = ordered_labels(list(y_test) + list(predictions))
         save_confusion_matrix(
             figures_dir / f"confusion_matrix_{safe_name}.png",
             y_test,
             predictions,
             f"{experiment} / {model_name}",
+            labels=labels,
+            display_labels=[str(label) for label in labels],
         )
         save_model_importance(
             model,
