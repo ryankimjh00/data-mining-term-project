@@ -119,6 +119,13 @@ python3 src/feature_poster.py --input data/kobis_tmdb_title_matches.csv --poster
 ```
 
 제목, 메타데이터, 포스터 특성을 통합한 학습용 CSV를 만듭니다.
+전처리 결과에는 관객 수 기준 성공도 랭크도 함께 생성됩니다.
+
+- `D`: 100만 명 미만
+- `C`: 100만 명 이상 300만 명 미만
+- `B`: 300만 명 이상 500만 명 미만
+- `A`: 500만 명 이상 1000만 명 미만
+- `S`: 1000만 명 이상
 
 ```bash
 python3 src/preprocessing.py --input data/kobis_tmdb_title_matches.csv --output data/processed/movie_features.csv
@@ -128,6 +135,12 @@ python3 src/preprocessing.py --input data/kobis_tmdb_title_matches.csv --output 
 
 ```bash
 python3 src/train_classification.py --input data/processed/movie_features.csv --target is_success_3000000
+```
+
+성공도 랭크 분류를 실행하려면 타깃을 `success_rank`로 지정합니다.
+
+```bash
+python3 src/train_classification.py --input data/processed/movie_features.csv --target success_rank
 ```
 
 회귀 모델을 실행합니다.
