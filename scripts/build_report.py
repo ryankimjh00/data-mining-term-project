@@ -653,13 +653,44 @@ def create_actor_hit_probability_chart(path: Path) -> dict[str, object]:
     actor_signal["single_actor_hit_prob_pct"] = actor_signal["single_actor_hit_prob"] * 100
     actor_signal["mean_audience_million"] = actor_signal["mean_audience"] / 1_000_000
     actor_signal["median_audience_million"] = actor_signal["median_audience"] / 1_000_000
+    actor_signal["profile_score"] = (
+        actor_signal["n_movies"].rank(pct=True) * 0.55
+        + actor_signal["mean_audience_million"].rank(pct=True) * 0.45
+    )
+    actor_signal["profile_group"] = np.select(
+        [
+            actor_signal["profile_score"] >= actor_signal["profile_score"].quantile(0.67),
+            actor_signal["profile_score"] <= actor_signal["profile_score"].quantile(0.40),
+        ],
+        ["상위 인지도", "낮은 인지도"],
+        default="중간 인지도",
+    )
 
-    plot_data = actor_signal.sort_values("single_actor_hit_prob_pct", ascending=False).head(15)
-    plot_data = plot_data.sort_values("single_actor_hit_prob_pct")
+    top_probability = actor_signal.sort_values("single_actor_hit_prob_pct", ascending=False).head(8)
+    lower_profile_probability = (
+        actor_signal[
+            actor_signal["profile_group"].ne("상위 인지도")
+            & actor_signal["n_movies"].le(8)
+            & ~actor_signal["actor"].isin(top_probability["actor"])
+        ]
+        .sort_values("single_actor_hit_prob_pct", ascending=False)
+        .head(8)
+    )
+
+    plot_data = pd.concat(
+        [
+            top_probability.assign(display_group="상위 확률"),
+            lower_profile_probability.assign(display_group="중저인지도 후보"),
+        ],
+        ignore_index=True,
+    ).drop_duplicates(subset=["actor"])
+    plot_data["actor_label"] = plot_data["actor"] + " · " + plot_data["display_group"]
+    plot_data = plot_data.sort_values(["display_group", "single_actor_hit_prob_pct"], ascending=[True, True])
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.barh(plot_data["actor"], plot_data["single_actor_hit_prob_pct"], color="#457B9D")
+    colors = plot_data["display_group"].map({"상위 확률": "#457B9D", "중저인지도 후보": "#E07A5F"}).fillna("#457B9D")
+    ax.barh(plot_data["actor_label"], plot_data["single_actor_hit_prob_pct"], color=colors)
     ax.set_xlim(0, 100)
-    ax.set_title("배우 신호만 넣었을 때 500만 돌파 확률 상위 배우")
+    ax.set_title("배우 신호만 넣었을 때 500만 돌파 확률 후보")
     ax.set_xlabel("예측 확률 (%)")
     ax.set_ylabel("")
     ax.grid(axis="x", alpha=0.25)
@@ -668,7 +699,8 @@ def create_actor_hit_probability_chart(path: Path) -> dict[str, object]:
     plt.close(fig)
     return {
         "metrics": pd.DataFrame([metrics("최빈값 기준선", baseline), metrics("LogisticCV 배우 원-핫", logit)]),
-        "top_probability": actor_signal.sort_values("single_actor_hit_prob_pct", ascending=False).head(8),
+        "top_probability": top_probability,
+        "lower_profile_probability": lower_profile_probability,
         "class_counts": y.value_counts().to_dict(),
     }
 
@@ -1721,6 +1753,11 @@ def add_notebook_analysis_section(doc: Document, charts: dict[str, Path], stats:
         ],
         widths=[1.8, 0.75, 0.8, 0.85, 0.75, 0.9],
     )
+    add_paragraph(
+        doc,
+        "아래 표는 확률 상위 배우와 함께, 데이터 내 출연편수와 평균 관객 수를 기준으로 상위 인지도군보다 한 단계 낮게 잡힌 중저인지도 후보를 별도로 보여준다. "
+        "인지도는 외부 검색량이나 설문 지표가 아니라 본 데이터 내부의 노출도 proxy이므로 보조 해석으로만 사용한다.",
+    )
     prob_rows = []
     for _, row in actor_hit["top_probability"].iterrows():
         prob_rows.append(
@@ -1738,7 +1775,24 @@ def add_notebook_analysis_section(doc: Document, charts: dict[str, Path], stats:
         prob_rows,
         widths=[1.55, 0.8, 1.0, 1.2, 1.25],
     )
-    add_picture(doc, charts["actor_hit_probability"], width=6.2, caption="그림 20. 배우 신호 기반 500만 돌파 확률 상위 배우")
+    lower_profile_rows = []
+    for _, row in actor_hit["lower_profile_probability"].iterrows():
+        lower_profile_rows.append(
+            [
+                row["actor"],
+                fmt_int(row["n_movies"]),
+                f"{row['single_actor_hit_prob_pct']:.1f}%",
+                fmt_pct(row["hit_rate_5m"]),
+                f"{row['mean_audience_million']:.2f}",
+            ]
+        )
+    add_table(
+        doc,
+        ["중저인지도 후보", "출연편수", "단독 확률", "실제 500만 비율", "평균 관객(백만)"],
+        lower_profile_rows,
+        widths=[1.55, 0.8, 1.0, 1.2, 1.25],
+    )
+    add_picture(doc, charts["actor_hit_probability"], width=6.2, caption="그림 20. 배우 신호 기반 500만 돌파 확률 후보")
     add_paragraph(
         doc,
         "단독 확률은 특정 배우 더미만 켠 가상 입력에 대한 모델 출력이다. 실제 영화의 장르, 제작비, 감독, 개봉 시기를 반영한 확률이 아니므로 캐스팅 효과를 단정하면 안 된다.",
