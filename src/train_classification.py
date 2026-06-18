@@ -82,9 +82,9 @@ def build_models(random_state: int) -> Dict[str, object]:
         "random_forest": make_pipeline(
             SimpleImputer(strategy="median"),
             RandomForestClassifier(
-                n_estimators=300,
+                n_estimators=500,
                 min_samples_leaf=3,
-                class_weight="balanced",
+                class_weight="balanced_subsample",
                 random_state=random_state,
                 n_jobs=-1,
             ),
